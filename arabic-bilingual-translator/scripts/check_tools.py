@@ -1,5 +1,5 @@
 """check_tools.py
-Detect which generation backends and PDF tools are available on this machine,
+Detect which generation backends and PDF/image tools are available on this machine,
 and print a tailored command plan for translating an Arabic document.
 
 Usage:
@@ -88,14 +88,18 @@ def main():
     print(f"  docx-js (npm)         -> {'OK' if docx_js_ok else 'NOT INSTALLED'}")
     print()
 
-    # --- PDF tools ---
-    print("[PDF source reading & visual check]")
+    # --- PDF/image tools ---
+    print("[PDF/image source reading & visual check]")
     poppler_ok = have("pdftoppm") and have("pdftotext") and have("pdfinfo")
     soffice_ok = have("soffice") or have("libreoffice")
     pymupdf_ok = have_module(PYTHON_EXE, "fitz") if py_ok else False
+    pillow_ok = have_module(PYTHON_EXE, "PIL") if py_ok else False
+    tesseract_ok = have("tesseract")
+    print(f"  Pillow (PIL)          -> {'OK' if pillow_ok else 'NOT INSTALLED'}")
     print(f"  Poppler (pdftoppm)    -> {'OK' if poppler_ok else 'NOT INSTALLED'}")
-    print(f"  LibreOffice (soffice) -> {'OK' if soffice_ok else 'NOT INSTALLED'}")
     print(f"  pymupdf (fitz)        -> {'OK' if pymupdf_ok else 'NOT INSTALLED'}")
+    print(f"  Tesseract OCR         -> {'OK' if tesseract_ok else 'NOT INSTALLED'}")
+    print(f"  LibreOffice (soffice) -> {'OK' if soffice_ok else 'NOT INSTALLED'}")
     print()
 
     # --- Recommended backend ---
@@ -145,6 +149,22 @@ def main():
         print(f'  & "{PYTHON_EXE}" build_bilingual_py.py')
         print()
 
+    print("  # Prepare PDF/image sources for visual translation:")
+    print(
+        f'  & "{PYTHON_EXE}" scripts/prepare_visual_source.py "source.pdf" '
+        "--out visual_source --dpi 220 --enhance"
+    )
+    print(
+        f'  & "{PYTHON_EXE}" scripts/prepare_visual_source.py "page-001.jpg" '
+        '"page-002.jpg" --out visual_source --enhance'
+    )
+    print()
+
+    if not pillow_ok:
+        print("  # Image preparation requires Pillow:")
+        print(f'  & "{PYTHON_EXE}" -m pip install pillow')
+        print()
+
     if not poppler_ok and not pymupdf_ok:
         print("  # PDF source reading: neither Poppler nor pymupdf available.")
         print("  #   Option A (preferred): install pymupdf (no system deps):")
@@ -152,6 +172,11 @@ def main():
         print("  #   Option B: install Poppler for Windows from")
         print("  #     https://github.com/oschwartz10612/poppler-windows/releases")
         print("  #     and add its bin/ to PATH.")
+        print()
+
+    if not tesseract_ok:
+        print("  # OCR: Tesseract is optional. Use it only as a draft aid;")
+        print("  #      always visually verify OCR text against the page image.")
         print()
 
     if not soffice_ok:

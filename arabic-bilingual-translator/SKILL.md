@@ -1,34 +1,50 @@
 ---
 name: arabic-bilingual-translator
-description: Translate Arabic, English, or Chinese source documents into two bilingual Word files — one English-Arabic (EN left / AR right) and one Chinese-Arabic (ZH left / AR right) — preserving legal structure, reference identifiers, and party names, and surfacing rather than silently resolving ambiguities. This skill should be used when the user asks to translate an Arabic legal or general document into English and/or Chinese (or vice versa: EN/ZH source into Arabic), produce a side-by-side bilingual Word file, render Arabic right-to-left correctly, or handle Saudi/GCC legal terminology and Hijri dates. Triggers include phrases like "translate this Arabic document", "bilingual Arabic Word", "EN-AR translation", "ZH-AR translation", "Arabic legal translation", "沙特法律翻译", "阿拉伯语对照翻译", "阿语 Word".
-agent_created: true
+description: Translate Arabic, English, or Chinese source documents, PDFs, scanned PDFs, page images, screenshots, or photographed documents into bilingual Word files — one English-Arabic (EN left / AR right) and one Chinese-Arabic (ZH left / AR right) — preserving legal structure, reference identifiers, and party names, and surfacing rather than silently resolving ambiguities. This skill should be used when the user asks to translate an Arabic legal or general document, PDF, scan, image, or photo into English and/or Chinese (or vice versa: EN/ZH source into Arabic), produce a side-by-side bilingual Word file, render Arabic right-to-left correctly, read Arabic from PDFs/images, or handle Saudi/GCC legal terminology and Hijri dates. Triggers include phrases like "translate this Arabic PDF", "translate these images", "bilingual Arabic Word", "EN-AR translation", "ZH-AR translation", "Arabic legal translation", "沙特法律翻译", "阿拉伯语对照翻译", "阿语 PDF", "图片翻译".
 ---
 
 # Arabic Bilingual Translator
 
 ## Overview
 
-Turn an Arabic, English, or Chinese source document into two clean, professionally formatted Word files: one **English–Arabic** (EN left / AR right) and one **Chinese–Arabic** (ZH left / AR right), fit to circulate to counsel and stakeholders. The hard parts of this job are not the language — they are (1) reading scanned Arabic correctly, (2) preserving the structural and citational conventions a lawyer relies on, (3) rendering Arabic right-to-left in Word without breakage, and (4) surfacing rather than silently resolving the ambiguities that change legal meaning. This skill encodes the whole pipeline so each document does not have to be re-figured-out from scratch.
+Turn an Arabic, English, or Chinese source document — including `.docx`, born-digital PDF, scanned PDF, screenshots, page images, or photographed documents — into two clean, professionally formatted Word files: one **English–Arabic** (EN left / AR right) and one **Chinese–Arabic** (ZH left / AR right), fit to circulate to counsel and stakeholders. The hard parts of this job are not the language — they are (1) reading scanned Arabic correctly, (2) preserving the structural and citational conventions a lawyer relies on, (3) rendering Arabic right-to-left in Word without breakage, and (4) surfacing rather than silently resolving the ambiguities that change legal meaning. This skill encodes the whole pipeline so each document does not have to be re-figured-out from scratch.
 
 Two generation backends are bundled. Pick by environment:
 
 - **docx-js** (`assets/build_bilingual_docx.js`) — preferred when Node.js is available; install `docx` locally into the managed workspace, never globally.
 - **python-docx** (`assets/build_bilingual_py.py`) — fallback when only Python is available; install `python-docx` into the managed venv.
 
-Run `python scripts/check_tools.py` once to see which backend and PDF tools are available on the current machine; it prints a ready-to-use command plan.
+Run `python scripts/check_tools.py` once to see which backend, PDF/image intake tools, and visual-check tools are available on the current machine; it prints a ready-to-use command plan.
 
 ## Pipeline at a Glance
 
-1. **Read the source correctly** — text extraction usually fails on scanned Arabic; rasterize and read visually.
+1. **Prepare and read the source correctly** — text extraction usually fails on scanned Arabic; normalize PDFs/images into page images and read visually.
 2. **Detect source language and target pair** — AR source → emit EN-AR + ZH-AR; EN source → emit EN-AR (+ AR-ZH if asked); ZH source → emit ZH-AR (+ AR-ZH if asked). Default: always produce both EN-AR and ZH-AR when the source is Arabic; produce the matching pair when the source is EN or ZH unless the user asks for only one.
 3. **Translate under the house rules** — preserve structure, references, and party names; never silently resolve ambiguity.
 4. **Build the Word deliverables** — use the two-column table template; left column = EN or ZH translation, right column = Arabic source/translation; handle Arabic RTL.
 5. **Validate and eyeball** — run the validator (docx-js path) or open-and-check (python-docx path), then render to image and inspect layout.
 6. **Deliver with a translator's note** — list every judgment call and ambiguity for counsel to verify.
 
-## Step 1 — Read the Source Correctly
+## Step 1 — Prepare and Read the Source Correctly
 
-Arabic legal PDFs are very often scans or image-based exports. Naive extraction produces garbled, reordered, or empty output and silently corrupts numbers and names — unacceptable for a legal document. Do not trust `pdftotext` / `extract-text` on an Arabic PDF without checking.
+Arabic legal PDFs are very often scans or image-based exports. Naive extraction produces garbled, reordered, or empty output and silently corrupts numbers and names — unacceptable for a legal document. Do not trust `pdftotext`, OCR, or model-read text on an Arabic PDF/image without visual checking.
+
+**Accepted source inputs:**
+
+- `.docx` or pasted text — extract text directly, then spot-check structure and references if an original rendering is available.
+- Born-digital `.pdf` — try text extraction, but validate against rendered pages because bidirectional Arabic often reorders numbers and punctuation.
+- Scanned `.pdf` — render pages to images first; read visually or use OCR only as a draft aid.
+- Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.webp`, `.bmp`) — normalize orientation and quality first; treat every image as one page unless the user says otherwise.
+- Multiple page images — preserve the filename/order supplied by the user and flag missing/duplicate pages before translating.
+
+For PDF or image sources, read `references/pdf-image-intake.md`, then run the intake helper to create a stable page set and manifest:
+
+```powershell
+& "<PYTHON_EXE>" scripts/prepare_visual_source.py "source.pdf" --out visual_source --dpi 220 --enhance
+& "<PYTHON_EXE>" scripts/prepare_visual_source.py "page-001.jpg" "page-002.jpg" --out visual_source --enhance
+```
+
+The helper writes normalized page images plus `manifest.json` and `reading-notes.md`. Use the manifest to keep page order, source page numbers, and any unreadable areas traceable through the final translator's note.
 
 ```bash
 # First, see what the file actually is and whether text extraction is usable
@@ -36,14 +52,14 @@ pdfinfo source.pdf
 pdftotext -layout source.pdf - | head -40    # if garbled / empty / scrambled, DO NOT use it
 ```
 
-When extraction is unreliable (the common case), rasterize the pages and read them visually — this is the reliable path for Arabic:
+When extraction is unreliable (the common case), rasterize the pages and read them visually — this is the reliable path for Arabic. The helper above uses PyMuPDF when available and falls back to Poppler; direct Poppler usage is:
 
 ```bash
 pdftoppm -jpeg -r 200 source.pdf page        # 200 dpi is the sweet spot for Arabic legibility
 ls page*.jpg
 ```
 
-Then view each `page-N.jpg` and read the Arabic directly from the image. Resolution matters: below ~150 dpi Arabic diacritics and digits blur; 200 dpi is reliable, go to 300 for dense small print.
+Then view each `page-N.jpg` or prepared page image and read the Arabic directly from the image. Resolution matters: below ~150 dpi Arabic diacritics and digits blur; 200-220 dpi is reliable, go to 300 for dense small print.
 
 **Windows fallback when Poppler is missing:** use Python with `pdf2image` + `Pillow`, or `pymupdf` (fitz), installed into the managed venv:
 
@@ -53,9 +69,9 @@ Then view each `page-N.jpg` and read the Arabic directly from the image. Resolut
 
 (`pdf2image` still needs Poppler installed on Windows; `pymupdf` does not and is the recommended no-Poppler path.)
 
-For `.docx` or born-digital Arabic PDFs where extraction is clean, use the text directly — but still spot-check digits, reference numbers, and Hijri dates against the rendered page, because bidirectional text frequently reorders numbers during extraction.
+For `.docx` or born-digital Arabic PDFs where extraction is clean, use the text directly — but still spot-check digits, reference numbers, and Hijri dates against the rendered page, because bidirectional text frequently reorders numbers during extraction. For image inputs, do not paraphrase from visual impression alone: segment the source into rows/paragraphs, transcribe or summarize each source segment, then translate segment-by-segment so omissions are visible.
 
-If the user pasted Arabic text directly into chat, work from that, but flag that the translation is of the text as given and cannot be verified against an original.
+If the user pasted Arabic text directly into chat, work from that, but flag that the translation is of the text as given and cannot be verified against an original. If the user supplies only low-resolution, cropped, rotated, blurred, or glare-obscured images, translate readable text and list the unreadable regions in the translator's note instead of guessing.
 
 ## Step 2 — Detect Source Language and Target Pair
 
@@ -256,8 +272,10 @@ This skill is **self-contained** — it does not depend on any external "docx sk
   ```
 
 **Optional (PDF source reading & visual check):**
-- Poppler (`pdftoppm`, `pdftotext`, `pdfinfo`) — for rasterizing and extracting Arabic PDFs
-- `pymupdf` (Python) — Poppler-free alternative for PDF text extraction and page rendering
+- Pillow (`PIL`) — for normalizing page images, screenshots, and photographed documents
+- `pymupdf` (Python) — Poppler-free PDF text extraction and page rendering; preferred for `scripts/prepare_visual_source.py`
+- Poppler (`pdftoppm`, `pdftotext`, `pdfinfo`) — fallback for rasterizing and extracting Arabic PDFs
+- Tesseract OCR with Arabic/English/Chinese language data — optional draft text aid only; always visually verify
 - LibreOffice (`soffice`) — for converting the output `.docx` to PDF for the visual check
 
 Run `python scripts/check_tools.py` to see which are available and get a tailored command plan.
@@ -266,6 +284,7 @@ Run `python scripts/check_tools.py` to see which are available and get a tailore
 
 - `references/glossary-legal.md` — standard English/Chinese renderings of recurring Saudi/GCC legal entities, courts, statutes, and competition-law terms, plus Hijri-date guidance. Read it before translating in legal mode so entity and term renderings are consistent across documents.
 - `references/glossary-general.md` — high-frequency general-domain Arabic terms with EN/ZH renderings. Read it before translating in general mode.
+- `references/pdf-image-intake.md` — PDF/image intake workflow, OCR rules, page-order checks, and visual-reading quality controls. Read it whenever the source is a PDF, scanned PDF, screenshot, page image, or photo.
 - `references/rtl-and-dates.md` — detailed RTL rendering rules for both docx-js and python-docx, common RTL bugs and how to spot them, and the Hijri→Gregorian conversion recipe with worked examples.
 
 ## Asset Files
@@ -273,3 +292,4 @@ Run `python scripts/check_tools.py` to see which are available and get a tailore
 - `assets/build_bilingual_docx.js` — docx-js build template (A4, RTL-aware, legal formatting, two-column side-by-side). Copy and edit; do not edit in place.
 - `assets/build_bilingual_py.py` — python-docx build template (same formatting target, RTL via raw XML). Copy and edit; do not edit in place.
 - `scripts/check_tools.py` — detect available tools and print a command plan.
+- `scripts/prepare_visual_source.py` — convert PDF pages and image files into normalized per-page images plus a manifest for visual translation.
